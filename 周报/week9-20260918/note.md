@@ -7,7 +7,7 @@
 - 【综述】全品类图像隐写，传统 + 深度学习隐写 —— [*Image Steganography Based on Machine Learning Algorithms: A Survey*](./docs/paper1.md)（Journal of Science and Engineering  Applications 2026.4）
 - 【综述】生成式隐写，扩散模型为主，含隐写检测 —— [*A review of generative coverless image steganography based on diffusion models*](./docs/paper2.md)（Neurocomputing 2026.5）
 
-## 基础内容学习
+## 扩散模型基础内容学习
 
 ### DDPM 先导
 
@@ -81,235 +81,71 @@ $$
 
 > **一句话总结**：边际似然就是"把所有可能的潜变量都考虑进去后，观测数据出现的概率"——我们真正想建模的是观测数据 $x$ 的分布，$z$ 只是增强表达能力的工具，必须被积分掉。DDPM 属于潜变量模型这一大类，但潜变量结构不同：它用固定的前向加噪过程定义潜变量（整条马尔可夫链 $x_{1:T}$），用可学习的反向去噪过程生成数据。
 
-#### 公式与相关概念解析
-
-##### 一、DDPM 第二章核心公式
-
-DDPM 第二章 "Background" 的核心，是把扩散模型的推导，从"生成数据"的直觉，严谨地绑定到 **变分推断（Variational Inference）** 的框架上。这一章的公式可以分为三个层次：**定义两个过程**、**写出似然下界**、**给出简化目标**。
-
-###### 公式 (1)：逆向去噪过程
-
-$$
-p_\theta(x_{0:T}) := p(x_T)\prod_{t=1}^T p_\theta(x_{t-1}|x_t)
-$$
-
-这是**逆向过程**的联合分布定义。它表示：从纯噪声 $x_T$ 出发，一步步去噪，最终得到数据 $x_0$。
-
-其中 $p(x_T)=\mathcal{N}(0,I)$ 是固定的标准高斯分布，不需要学习。每一步的去噪转移 $p_\theta(x_{t-1}|x_t)$ 被定义为高斯分布，其**均值与方差由神经网络（通常是 U-Net）预测**，这就是 $\theta$ 参数化的来源。
-
-###### 公式 (2)：前向加噪过程
-
-$$
-q(x_{1:T}|x_0) := \prod_{t=1}^T q(x_t|x_{t-1}), \qquad q(x_t|x_{t-1}) := \mathcal{N}(x_t;\, \sqrt{1-\beta_t}\,x_{t-1},\, \beta_t I)
-$$
-
-这是**前向过程**的定义，也是整个推导的基石。它没有可学习参数，完全由预设的方差表 $\{\beta_t\}$ 决定。
-
-关键点在于**马尔可夫性**：$x_t$ 只依赖于 $x_{t-1}$。由此，给定 $x_0$ 后所有中间步骤的联合概率，可以写成每一步转移概率的乘积。
-
-公式 (2) 的右半部分揭示了单步加噪的具体操作：对上一时刻的数据乘以 $\sqrt{1-\beta_t}$，再加上方差为 $\beta_t$ 的高斯噪声。
-
-###### 公式 (3)：变分下界（ELBO）
-
-$$
-\mathbb{E}[-\log p_\theta(x_0)] \le \mathbb{E}_q\left[-\log \frac{p_\theta(x_{0:T})}{q(x_{1:T}|x_0)}\right]
-$$
-
-这是训练损失的理论出发点。我们真正想最小化的是**负对数似然** $-\log p_\theta(x_0)$，但直接计算它涉及对高维隐变量 $x_{1:T}$ 的积分，不可处理。
-
-因此，引入变分推断的思想：用一个容易处理的分布 $q$（也就是定义好的前向过程）来"夹逼"它。通过 Jensen 不等式，可以得到一个可计算的**下界**。优化这个下界（即最大化似然），就是在间接优化模型。
-
-###### 公式 (4)：前向过程的闭式采样
-
-$$
-q(x_t|x_0) = \mathcal{N}(x_t;\, \sqrt{\bar\alpha_t}\,x_0,\, (1-\bar\alpha_t)I)
-$$
-
-这是 DDPM 推导中最实用的性质。它意味着：**不需要一步步地加噪**，可以直接从 $x_0$ 算出任意时刻 $t$ 的 $x_t$。
-
-定义 $\alpha_t = 1-\beta_t$，$\bar\alpha_t = \prod_{s=1}^t \alpha_s$。利用高斯分布的可加性，一步步展开递推式，最终得到 $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon$，其中 $\epsilon \sim \mathcal{N}(0,I)$。这大大提高了训练时采样的效率。
-
-###### 公式 (5)：损失函数的分解形式
-
-$$
-L = \mathbb{E}_q\left[\underbrace{D_{\mathrm{KL}}(q(x_T|x_0) \,\|\, p(x_T))}_{L_T} + \sum_{t>1} \underbrace{D_{\mathrm{KL}}(q(x_{t-1}|x_t,x_0) \,\|\, p_\theta(x_{t-1}|x_t))}_{L_{t-1}} - \underbrace{\log p_\theta(x_0|x_1)}_{L_0}\right]
-$$
-
-对公式 (3) 的下界做进一步数学分解，会得到这个三项结构。它让损失函数的物理意义变得清晰：
-
-- **$L_T$**：约束最终噪声分布接近标准正态，通常可忽略（因为 $\beta_t$ 设计得当）。
-- **$L_{t-1}$**：**核心项**。它要求逆向过程的每一步 $p_\theta(x_{t-1}|x_t)$ 去逼近一个**真实的后验分布** $q(x_{t-1}|x_t,x_0)$。这个后验是高斯分布，且是 tractable 的。
-- **$L_0$**：最终的离散化解码，通常作为重建项处理。
-
-这个分解的意义在于：既然 $q(x_{t-1}|x_t,x_0)$ 是已知的高斯分布，而 $p_\theta$ 也是高斯分布，那么它们之间的 KL 散度就有闭式解。这直接引出了 DDPM 最终那个极其简洁的训练目标。
-
-##### 二、ELBO 与似然估计的关系
-
-ELBO 本身不是似然估计，而是对数似然的一个**下界**。
-
-###### 与"似然估计"的关系
-
-我们真正想最大化的是**边际对数似然**：
-
-$$
-\log p_\theta(x_0)=\log \int p_\theta(x_{0:T})\,dx_{1:T}
-$$
-
-但这个积分在高维空间里**不可计算**，所以无法直接做最大似然估计。
-
-于是引入变分分布 $q(x_{1:T}|x_0)$，通过 Jensen 不等式得到：
-
-$$
-\log p_\theta(x_0)\ge \mathbb{E}_q\left[\log \frac{p_\theta(x_{0:T})}{q(x_{1:T}|x_0)}\right]=\text{ELBO}
-$$
-
-所以：
-
-- **似然估计**：目标是 $\log p_\theta(x_0)$，不可直接算。
-- **ELBO**：是它的可计算下界。
-- **最大化 ELBO**：等价于在间接最大化对数似然，因为
-
-$$
-\log p_\theta(x_0)=\text{ELBO}+D_{\mathrm{KL}}\big(q(x_{1:T}|x_0) \,\|\, p_\theta(x_{1:T}|x_0)\big)
-$$
-
-而 KL 散度非负。
-
-###### 一个容易混淆的点
-
-DDPM 第二章里写的损失是：
-
-$$
-\mathbb{E}\left[-\log p_\theta(x_0)\right]\le \mathbb{E}_q\left[-\log \frac{p_\theta(x_{0:T})}{q(x_{1:T}|x_0)}\right]
-$$
-
-左边是**负对数似然**，右边是**负 ELBO**。所以最小化右边，就是在最小化负对数似然的上界，也就是在最大化似然的下界。
-
-###### 小结
-
-ELBO 不是似然估计本身，而是**变分推断中用来近似最大似然估计的目标函数**。在 DDPM 里，因为前向过程 $q$ 被固定且设计得可处理，ELBO 才能被进一步分解成公式 (5) 那种可逐项计算的形式。
-
-##### 三、最大似然估计（MLE）
-
-最大似然估计（Maximum Likelihood Estimation, MLE）是统计学里最核心的参数估计方法之一。用一句话概括：**找到一组参数，使得观测到的数据在这组参数下出现的概率最大。**
-
-###### 直观理解：抛硬币
-
-假设你有一个不均匀的硬币，抛 10 次，结果是 7 次正面、3 次反面。现在问：这枚硬币正面朝上的概率 $p$ 是多少？
-
-最大似然的思想就是：**哪个 $p$ 值最有可能产生"7正3反"这个结果？**
-
-- 如果 $p=0.5$，出现这个结果的概率是 $C_{10}^7 \cdot 0.5^{10} \approx 0.117$
-- 如果 $p=0.7$，概率是 $C_{10}^7 \cdot 0.7^7 \cdot 0.3^3 \approx 0.267$
-- 如果 $p=0.9$，概率是 $C_{10}^7 \cdot 0.9^7 \cdot 0.1^3 \approx 0.057$
-
-显然 $p=0.7$ 时概率最大，所以 MLE 的估计结果就是 $\hat{p}=0.7$。
-
-###### 数学形式
-
-设观测数据为 $x = \{x_1, x_2, \dots, x_n\}$，模型参数为 $\theta$。
-
-**似然函数**定义为：在参数 $\theta$ 下，观测到当前数据的概率（或概率密度）：
-
-$$
-L(\theta) = p(x|\theta) = \prod_{i=1}^n p(x_i|\theta)
-$$
-
-（这里假设样本独立同分布，所以联合概率可以写成乘积。）
-
-**最大似然估计**就是求解：
-
-$$
-\hat{\theta}_{\text{MLE}} = \arg\max_\theta L(\theta)
-$$
-
-实际计算时，通常取对数，把乘积变成求和，更方便求导：
-
-$$
-\hat{\theta}_{\text{MLE}} = \arg\max_\theta \log L(\theta) = \arg\max_\theta \sum_{i=1}^n \log p(x_i|\theta)
-$$
-
-因为对数函数是单调递增的，所以最大化 $L(\theta)$ 和最大化 $\log L(\theta)$ 等价。
-
-###### 在扩散模型里的角色
-
-在 DDPM 中，我们想最大化的是模型对真实数据 $x_0$ 的**边际对数似然**：
-
-$$
-\max_\theta \log p_\theta(x_0)
-$$
-
-但 $p_\theta(x_0)$ 涉及对隐变量 $x_{1:T}$ 的积分，不可计算。所以退而求其次，最大化它的下界 ELBO。因此 DDPM 的训练目标不是严格的 MLE，而是**变分下界意义下的近似最大似然**。
-
-###### 一句话总结
-
-最大似然估计就是：**让模型认为"已经发生的事"最有可能发生**。你手里有一堆数据，调整参数，使这些数据在你的模型下概率最大，这就是 MLE。
-
-##### 四、KL 散度（Kullback-Leibler Divergence）
+##### 五、KL 散度（Kullback-Leibler Divergence）
 
 KL 散度是信息论和统计学里用来衡量**两个概率分布有多不一样**的一个量。在扩散模型里，它几乎是整个损失函数推导的核心工具。
 
-###### 直观理解
+###### 1. 直观理解
 
 假设你有两个分布：
 
 - $p(x)$：真实的分布（比如真实数据的分布）
 - $q(x)$：你用来近似它的分布（比如模型学出来的分布）
 
-KL 散度 $D_{\mathrm{KL}}(p \,\|\, q)$ 衡量的是：**如果用 $q$ 来代替 $p$，你会损失多少信息**。
+KL 散度 $D_{\mathrm{KL}}(p \parallel q)$ 衡量的是：**如果用 $q$ 来代替 $p$，你会损失多少信息**。
 
 它不是距离，因为不对称：
 
 $$
-D_{\mathrm{KL}}(p \,\|\, q) \neq D_{\mathrm{KL}}(q \,\|\, p)
+D_{\mathrm{KL}}(p \parallel q) \neq D_{\mathrm{KL}}(q \parallel p)
 $$
 
 所以它叫"散度"而不是"距离"。
 
-###### 数学定义
+###### 2. 数学定义
 
 **离散分布：**
 
 $$
-D_{\mathrm{KL}}(p \,\|\, q) = \sum_x p(x) \log \frac{p(x)}{q(x)}
+D_{\mathrm{KL}}(p \parallel q) = \sum_x p(x) \log \frac{p(x)}{q(x)}
 $$
 
 **连续分布：**
 
 $$
-D_{\mathrm{KL}}(p \,\|\, q) = \int p(x) \log \frac{p(x)}{q(x)} \, dx
+D_{\mathrm{KL}}(p \parallel q) = \int p(x) \log \frac{p(x)}{q(x)} \, dx
 $$
 
 也可以写成期望形式：
 
 $$
-D_{\mathrm{KL}}(p \,\|\, q) = \mathbb{E}_{x \sim p}\left[\log \frac{p(x)}{q(x)}\right]
+D_{\mathrm{KL}}(p \parallel q) = \mathbb{E}_{x \sim p}\left[\log \frac{p(x)}{q(x)}\right]
 $$
 
 注意：期望是**对 $p$ 取的**，不是对 $q$。这是理解 KL 散度方向性的关键。
 
-###### 关键性质
+###### 3. 关键性质
 
-1. **非负性**：$D_{\mathrm{KL}}(p \,\|\, q) \geq 0$，当且仅当 $p = q$ 时取 0。
-2. **不对称**：$D_{\mathrm{KL}}(p \,\|\, q) \neq D_{\mathrm{KL}}(q \,\|\, p)$。
+1. **非负性**：$D_{\mathrm{KL}}(p \parallel q) \geq 0$，当且仅当 $p = q$ 时取 0。
+2. **不对称**：$D_{\mathrm{KL}}(p \parallel q) \neq D_{\mathrm{KL}}(q \parallel p)$。
 3. **不满足三角不等式**：所以它不是度量。
 4. **对 $q$ 有定义要求**：如果 $q(x)=0$ 但 $p(x)>0$，KL 散度会趋于无穷大。这意味着 $q$ 必须覆盖 $p$ 的支撑集。
 
-###### 两个方向的区别（很重要）
+###### 4. 两个方向的区别（很重要）
 
 | 方向 | 名称 | 行为 |
 |---|---|---|
-| $D_{\mathrm{KL}}(p \,\|\, q)$ | 前向 KL | 倾向于让 $q$ 覆盖 $p$ 的所有模式（mass-covering） |
-| $D_{\mathrm{KL}}(q \,\|\, p)$ | 反向 KL | 倾向于让 $q$ 集中在 $p$ 的某个模式上（mode-seeking） |
+| $D_{\mathrm{KL}}(p \parallel q)$ | 前向 KL | 倾向于让 $q$ 覆盖 $p$ 的所有模式（mass-covering） |
+| $D_{\mathrm{KL}}(q \parallel p)$ | 反向 KL | 倾向于让 $q$ 集中在 $p$ 的某个模式上（mode-seeking） |
 
-在变分推断里，我们通常最小化 $D_{\mathrm{KL}}(q \,\|\, p)$，其中 $q$ 是变分分布，$p$ 是真实后验。这个方向会导致 $q$ 偏向于拟合 $p$ 的某一个峰。
+在变分推断里，我们通常最小化 $D_{\mathrm{KL}}(q \parallel p)$，其中 $q$ 是变分分布，$p$ 是真实后验。这个方向会导致 $q$ 偏向于拟合 $p$ 的某一个峰。
 
-###### 在扩散模型里的角色
+###### 5. 在扩散模型里的角色
 
 回到 DDPM 第二章，KL 散度出现在公式 (5) 的损失分解里：
 
 $$
-L = \mathbb{E}_q\left[D_{\mathrm{KL}}(q(x_T|x_0) \,\|\, p(x_T)) + \sum_{t>1} D_{\mathrm{KL}}(q(x_{t-1}|x_t,x_0) \,\|\, p_\theta(x_{t-1}|x_t)) - \log p_\theta(x_0|x_1)\right]
+L = \mathbb{E}_q\left[D_{\mathrm{KL}}(q(x_T|x_0) \parallel p(x_T)) + \sum_{t>1} D_{\mathrm{KL}}(q(x_{t-1}|x_t,x_0) \parallel p_\theta(x_{t-1}|x_t)) - \log p_\theta(x_0|x_1)\right]
 $$
 
 这里每个 $D_{\mathrm{KL}}$ 都在做同一件事：
@@ -319,78 +155,25 @@ $$
 
 因为两个都是高斯分布，它们的 KL 散度有**闭式解**。这正是 DDPM 能把损失函数写成简单形式的原因。
 
-具体来说，对于两个高斯分布：
+具体来说，对于两个高斯分布（一维形式；多维时各独立维度逐项求和）：
 
 $$
-D_{\mathrm{KL}}(\mathcal{N}(\mu_1,\sigma_1^2) \,\|\, \mathcal{N}(\mu_2,\sigma_2^2)) = \log\frac{\sigma_2}{\sigma_1} + \frac{\sigma_1^2+(\mu_1-\mu_2)^2}{2\sigma_2^2} - \frac{1}{2}
+D_{\mathrm{KL}}(\mathcal{N}(\mu_1,\sigma_1^2) \parallel \mathcal{N}(\mu_2,\sigma_2^2)) = \log\frac{\sigma_2}{\sigma_1} + \frac{\sigma_1^2+(\mu_1-\mu_2)^2}{2\sigma_2^2} - \frac{1}{2}
 $$
 
 在 DDPM 中，方差通常是固定的，所以这个 KL 散度最终简化为**均值的平方误差**，也就是论文里最终用的那个简单损失：
 
 $$
-L_{\text{simple}} = \mathbb{E}_{t,x_0,\epsilon}\left[\big\|\epsilon - \epsilon_\theta\big(\sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\; t\big)\big\|^2\right]
+L_{\text{simple}} = \mathbb{E}_{t,\,x_0,\,\epsilon}\left[\big\|\epsilon - \epsilon_\theta\big(\sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\; t\big)\big\|^2\right]
 $$
 
 ###### 一句话总结
 
-KL 散度衡量两个分布的差异，非负、不对称。在扩散模型里，它把"让模型分布逼近真实后验"这件事，变成了一个可以逐项计算的高斯 KL 散度，最终化简成了预测噪声的均方误差。
-
-##### 五、前向过程解析中的常见误区
-
-###### 1. 符号问题
-
-DDPM 论文原文的标准记法是：
-
-$$
-\alpha_t = 1-\beta_t, \qquad \bar\alpha_t=\prod_{s=1}^t \alpha_s
-$$
-
-不需要"纠正"成别的。转写/OCR 产生的错字（如把 $\bar\alpha_t$ 认成形近的乱码）直接忽略即可。
-
-###### 2. "$\beta_t$ 可被学习"要谨慎
-
-DDPM 原始论文把 $\beta_t$ 设为**固定超参数**（线性噪声表），不参与训练。论文里的表述是：
-
-- $\beta_t$ 可以固定，也可以被学习（论文提到理论上可通过重参数化学习）；
-- 但作者实际选择固定，直接采用线性噪声表。
-
-后来确实有工作（如 Improved DDPM）让模型预测方差，但那是**反向过程的方差 $\Sigma_\theta$**，不是前向的 $\beta_t$。所以要注意：**DDPM 实际训练中 $\beta_t$ 是固定的**，"学习 $\beta_t$"只是论文提到的一个可选项，并不是 DDPM 的实际做法。
-
-###### 3. 闭式采样公式的正确写法
-
-正确写法是：
-
-$$
-q(x_t|x_0)=\mathcal{N}\big(x_t;\, \sqrt{\bar\alpha_t}\,x_0,\, (1-\bar\alpha_t)I\big)
-$$
-
-意思是：均值是 $\sqrt{\bar\alpha_t}\,x_0$，方差是 $(1-\bar\alpha_t)I$。
-
-###### 4. "前向与反向形式相似"需限定条件
-
-这个说法来自扩散模型文献引用的结论（Feller）：当 $\beta_t$ 足够小，前向扩散的逆过程**也是高斯分布**，且形式相近。但要注意，这只是理论上的渐近性质，实际反向过程仍然需要用神经网络去逼近，并不是说反向过程自动就等于前向的逆。
-
-###### 5. "重参数化技巧"的用词
-
-在扩散模型里，从 $q(x_t|x_0)$ 采样确实用了类似技巧：
-
-$$
-x_t=\sqrt{\bar\alpha_t}\,x_0+\sqrt{1-\bar\alpha_t}\,\epsilon, \qquad \epsilon\sim\mathcal{N}(0,I)
-$$
-
-这确实是一种重参数化，但它的作用是**把随机性转移到 $\epsilon$ 上，使采样可导**。不过 DDPM 训练时并不需要对 $x_t$ 求导，所以这里更准确的说法是"**利用高斯分布的可加性得到闭式采样**"，而不是强调重参数化。
-
-###### 总结修正表
-
-| 常见表述 | 问题 | 正确说法 |
-|---|---|---|
-| 原文 $\alpha_t$ 记法有笔误 | 不对 | 原文记法正确，是转写时混淆了 |
-| $\beta_t$ 可通过重参数化学习 | 不准确 | DDPM 中 $\beta_t$ 固定；后来工作学的是反向方差 |
-| $q(x_t \mid x_0)$ 公式里多逗号 | 排版错误 | 均值应为 $\sqrt{\bar\alpha_t}\,x_0$ |
-| 前向反向"形式相似" | 需限定条件 | 仅在 $\beta_t \to 0$ 的渐近意义下成立 |
-| 闭式采样叫"重参数化技巧" | 用词易混 | 更准确说是高斯可加性得到的闭式采样 |
+> **KL 散度衡量两个分布的差异，非负、不对称。在扩散模型里，它把"让模型分布逼近真实后验"这件事，变成了一个可以逐项计算的高斯 KL 散度，最终化简成了预测噪声的均方误差。**
 
 ### DDPM 理解
+
+[【较真系列】讲人话-Diffusion Model全解(原理+代码+公式)】](https://www.bilibili.com/video/BV19H4y1G73r/?share_source=copy_web&vd_source=dcedb729c1920a524ddace9deca746fd)
 
 对论文 **第 2 章 Background** 与 **第 3 章 Diffusion models and denoising autoencoders** 的逐公式精读。第 2 章公式 (1)–(7) 的分工：**(1)(2) 定义模型 → (3) 定义训练目标 → (4)–(7) 让目标可计算**；第 3 章把变分下界一步步化简成"预测噪声"的 MSE，并给出完整的训练/采样算法（Algorithm 1、2）。
 
@@ -637,7 +420,7 @@ xT ~ N(0,I) ──> [εθ 预测噪声 → 按公式(11)去掉一部分噪声 + 
 
 # 二、问题与解决
 
-- 先学习扩散模型实现生成式图片隐写的基本知识。
+- 先学习扩散模型的基本知识。从代码层面了解扩散模型，从训练到推理的全流程，参考 https://github.com/LambdaLabsML/diffusion-from-scratch
 
 # 三、下周计划
 
@@ -645,4 +428,8 @@ xT ~ N(0,I) ──> [εθ 预测噪声 → 按公式(11)去掉一部分噪声 + 
 
 # 四、总结
 
-- 本周了解了图片隐写方向的基本内容，并且从扩散模型实现的生成式隐写方向入手，准备深入。
+- 概括 DDPM 的模型范式：
+  1. 使用固定的 beta 链和 alpha_bar 链实现 $x_0$ 到任意 $x_t$ 的前向过程。
+  2. 训练一个模型，输入  $x_t$ 和 $t$，得到预测噪声 $ε_θ$，这里 $ε_θ$ 与前向过程中使用的标准噪声 $ε$ 计算 loss，输入的 $x_t$ 是利用 1 中的步骤随机采样出来的。
+  3. 推理利用模型输出的 $ε_θ$ 计算 $p_\theta(x_{t-1}|x_t) := \mathcal{N}(x_{t-1};\, \mu_\theta(x_t, t),\, \Sigma_\theta(x_t, t))$ 中的 $\mu_\theta(x_t, t)$，通过重参数计算得到 $x_{t-1}$。
+  4. 重复操作就可以从完全随机的高斯噪声 $x_t$ 逐步去噪 得到 $x_0$。
