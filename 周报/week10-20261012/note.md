@@ -1,10 +1,10 @@
-# 周报 - 2026.10.12 - 2026.10.19
+# 周报 - 2026.10.12 - 2026.10.18
 ---
 # 一、本周核心工作/学习内容
 
 ## 文献阅读
 
-- 【论文】（论文核心内容） —— [*Rethinking Security of Diffusion-based Generative Steganography*](./docs/paper1.md)（论文来源）
+- 【论文】（提出了基于扩散模型的生成式隐写的安全性问题） —— [*Rethinking Security of Diffusion-based Generative Steganography*](../../papers/week10/paper1.md)
 
 ## 基础学习
 
@@ -110,7 +110,7 @@ class ConvVAE(nn.Module):
             nn.Sigmoid()  # 添加Sigmoid激活 将图片像素值归一化到[0,1]
         )
 
-    # 编码过程 通过编码器编码得到均值和方差
+    # 编码过程 通过编码器编码得到均值和方差 用于采样隐变量
     def encode(self, x):
         h = self.enc(x)
         h = h.view(h.size(0), -1)
@@ -149,6 +149,11 @@ def vae_loss(recon_x, x, mu, logvar):
     kld = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + kld, recon_loss, kld
 ```
+
+VAE 在学两件事：
+
+- ① 图像 ↔ 隐高斯分布 的映射；
+- ② 让隐空间具备**可生成性**：随便从先验 $p(z)$ 中采样一个 $z$，丢给 decoder，就能输出一张合理自然图像。
 
 ### DDIM
 
@@ -462,8 +467,8 @@ pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
 
 # 三、下周计划
 
-- [ ] 找更多图片隐写领域，各类别隐写方法的代表性论文，增加阅读量。
-- [ ] 检测方面，阅读《Mutual Information-Optimized Steganalysis for Generative Steganography》
+- [x] 找更多图片隐写领域，各类别隐写方法的代表性论文，增加阅读量。
+- [x] 检测方面，阅读《Mutual Information-Optimized Steganalysis for Generative Steganography》
 
 # 四、总结
 

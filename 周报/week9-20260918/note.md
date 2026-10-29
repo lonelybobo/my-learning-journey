@@ -4,8 +4,8 @@
 
 ## 文献阅读
 
-- 【综述】全品类图像隐写，传统 + 深度学习隐写 —— [*Image Steganography Based on Machine Learning Algorithms: A Survey*](./docs/paper1.md)（Journal of Science and Engineering  Applications 2026.4）
-- 【综述】生成式隐写，扩散模型为主，含隐写检测 —— [*A review of generative coverless image steganography based on diffusion models*](./docs/paper2.md)（Neurocomputing 2026.5）
+- 【综述】全品类图像隐写，传统 + 深度学习隐写 —— [*Image Steganography Based on Machine Learning Algorithms: A Survey*](../../papers/week9/paper1.md)（Journal of Science and Engineering  Applications 2026.4）
+- 【综述】生成式隐写，扩散模型为主，含隐写检测 —— [*A review of generative coverless image steganography based on diffusion models*](../../papers/week9/paper2.md)（Neurocomputing 2026.5）
 
 ## 扩散模型基础内容学习
 
